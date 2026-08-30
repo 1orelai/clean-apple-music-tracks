@@ -1,0 +1,132 @@
+#!/usr/bin/env osascript
+
+-- Usage:
+--   clean-apple-music-tracks -a <ALBUM> -p <PATTERN> [-r <ARTIST>] [-d]
+--
+-- Options:
+--   -a, --album    (Required) Album title to clean up.
+--   -p, --pattern  (Required) Perl-compatible regex pattern to remove.
+--   -r, --artist   (Optional) Filter tracks by specific artist.
+--   -d, --dry-run  (Optional) Preview title changes without modifying the Apple Music library.
+--   -h, --help     Show this help message.
+
+on run argv
+    set targetAlbum to ""
+    set pattern to ""
+    set targetArtist to ""
+    set isPreview to false
+
+    set i to 1
+    repeat while i ≤ (count of argv)
+        set currentArg to item i of argv
+
+        if (currentArg is "-a" or currentArg is "--album") then
+            if (i + 1) ≤ (count of argv) then
+                set targetAlbum to item (i + 1) of argv
+                set i to i + 2
+            else
+                my printError("Option " & currentArg & " requires an argument.")
+                return
+            end if
+        else if (currentArg is "-p" or currentArg is "--pattern") then
+            if (i + 1) ≤ (count of argv) then
+                set pattern to item (i + 1) of argv
+                set i to i + 2
+            else
+                my printError("Option " & currentArg & " requires an argument.")
+                return
+            end if
+        else if (currentArg is "-r" or currentArg is "--artist") then
+            if (i + 1) ≤ (count of argv) then
+                set targetArtist to item (i + 1) of argv
+                set i to i + 2
+            else
+                my printError("Option " & currentArg & " requires an argument.")
+                return
+            end if
+        else if currentArg is "-d" or currentArg is "--dry-run" then
+            set isPreview to true
+            set i to i + 1
+        else if currentArg is "-h" or currentArg is "--help" then
+            my showUsage()
+            return
+        else
+            my printError("Unknown option: " & currentArg)
+            my showUsage()
+            return
+        end if
+    end repeat
+
+    if targetAlbum is "" then
+        my printError("Missing required parameter: -a, --album")
+        my showUsage()
+        return
+    end if
+
+    if pattern is "" then
+        my printError("Missing required parameter: -p, --pattern")
+        my showUsage()
+        return
+    end if
+
+    tell application "Music"
+        if targetArtist is not "" then
+            set trackList to (every track whose album is targetAlbum and artist is targetArtist)
+        else
+            set trackList to (every track whose album is targetAlbum)
+        end if
+
+        if (count of trackList) is 0 then
+            my printMsg("[WARN] No tracks found matching album: \"" & targetAlbum & "\"")
+            return
+        end if
+
+        set changesMade to 0
+
+        repeat with theTrack in trackList
+            set oldName to (name of theTrack) as string
+            set newName to my stripPattern(oldName, pattern)
+
+            if oldName is not equal to newName and newName is not "" then
+                set changesMade to changesMade + 1
+                if isPreview then
+                    my printMsg("[PREVIEW] " & oldName & " -> " & newName)
+                else
+                    set name of theTrack to newName
+                    my printMsg("[UPDATED] " & oldName & " -> " & newName)
+                end if
+            end if
+        end repeat
+
+        if changesMade is 0 then
+            my printMsg("[INFO] No track titles matched pattern: \"" & pattern & "\"")
+        end if
+    end tell
+end run
+
+-- Helper to safely strip pattern using Perl regex environment variables
+on stripPattern(strText, strPattern)
+    return do shell script "PAT=" & quoted form of strPattern & " TXT=" & quoted form of strText & " perl -e 'my $p = $ENV{PAT}; my $t = $ENV{TXT}; $t =~ s/$p//g; $t =~ s/\\s+$//; print $t;'"
+end stripPattern
+
+-- Helper to display formatted help usage instructions
+on showUsage()
+    set usageText to "Usage:\n" & ¬
+        "  clean-apple-music-tracks -a <Album> -p <Pattern> [-r <Artist>] [-d]\n\n" & ¬
+        "Options:\n" & ¬
+        "  -a, --album     (Required) Album title to clean up.\n" & ¬
+        "  -p, --pattern   (Required) Perl regex pattern to strip from track names.\n" & ¬
+        "  -r, --artist    (Optional) Filter tracks by specific artist.\n" & ¬
+        "  -d, --dry-run   (Optional) Preview title changes without modifying the library.\n" & ¬
+        "  -h, --help      Show this help message."
+    my printMsg(usageText)
+end showUsage
+
+-- Output helpers
+on printMsg(msg)
+    do shell script "echo " & quoted form of msg
+end printMsg
+
+on printError(msg)
+    do shell script "echo " & quoted form of ("Error: " & msg) & " >&2"
+end printError
